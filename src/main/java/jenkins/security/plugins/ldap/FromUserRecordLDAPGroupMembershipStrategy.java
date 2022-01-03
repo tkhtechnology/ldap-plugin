@@ -25,7 +25,10 @@ package jenkins.security.plugins.ldap;
 
 import hudson.Extension;
 import hudson.security.LDAPSecurityRealm;
+
 import java.util.Set;
+import java.util.TreeSet;
+
 import org.apache.commons.lang.StringUtils;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.springframework.ldap.core.DirContextOperations;
@@ -33,6 +36,7 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
 import javax.naming.InvalidNameException;
+import javax.naming.NamingEnumeration;
 import javax.naming.NamingException;
 import javax.naming.directory.Attribute;
 import javax.naming.directory.Attributes;
@@ -55,6 +59,25 @@ public class FromUserRecordLDAPGroupMembershipStrategy extends LDAPGroupMembersh
     private static final Logger LOGGER = Logger.getLogger(FromUserRecordLDAPGroupMembershipStrategy.class.getName());
     private static final String USER_SEARCH_FILTER = "({0}={1})";
     private final String attributeName;
+    
+    private static class DisplayNameMapper implements LdapEntryMapper<Set<String>> {
+        @Override
+        public Set<String> mapAttributes(String dn, Attributes attributes) throws NamingException {
+            NamingEnumeration<?> enumeration;
+            if (attributes.get("displayName") != null) {
+                enumeration = attributes.get("displayName").getAll();
+            } else {
+                LOGGER.log(Level.FINEST, "No members for {0}", dn);
+                return Collections.emptySet();
+            }
+            Set<String> displayNames = new TreeSet<>();
+            while (enumeration.hasMore()) {
+                String displayName = String.valueOf(enumeration.next());
+                displayNames.add(displayName);
+            }
+            return displayNames;
+        }
+    }
 
     @DataBoundConstructor
     public FromUserRecordLDAPGroupMembershipStrategy(String attributeName) {
@@ -66,7 +89,7 @@ public class FromUserRecordLDAPGroupMembershipStrategy extends LDAPGroupMembersh
     }
 
     @Override
-    public Collection<? extends GrantedAuthority> getGrantedAuthorities(DirContextOperations userData, String username) {
+    public Collection<? extends GrantedAuthority> getGrantedAuthorities(DirContextOperations userData, String username, LDAPConfiguration conf) {
         List<GrantedAuthority> result = new ArrayList<GrantedAuthority>();
         Attributes attributes = userData.getAttributes();
         final String attributeName = getAttributeName();
@@ -78,10 +101,22 @@ public class FromUserRecordLDAPGroupMembershipStrategy extends LDAPGroupMembersh
                     try {
                         LdapName dn = new LdapName(groupName);
                         groupName = String.valueOf(dn.getRdn(dn.size() - 1).getValue());
+                        if(conf != null) {
+                        	LDAPExtendedTemplate template = conf.getLdapTemplate();
+                        	String searchBase = conf.getUserSearchBase() != null ? conf.getUserSearchBase() : "";
+                        	Set<String> displayNames = (Set<String>) template.searchForFirstEntry(searchBase, "(& (cn={0}) (objectclass=group) )", new Object[] {groupName}, new String[] {"displayName"}, new DisplayNameMapper() );
+                        	if (displayNames != null) {
+                        		displayNames.forEach(name -> {
+                        			result.add(new SimpleGrantedAuthority(name));
+                        		});
+                        	}
+                        } else {
+                        	LOGGER.log(Level.FINEST, "No LDAP configuration");
+                        }
+
                     } catch (InvalidNameException e) {
                         LOGGER.log(Level.FINEST, "Expected a Group DN but found: {0}", groupName);
                     }
-                    result.add(new SimpleGrantedAuthority(groupName));
                 }
             } catch (NamingException e) {
                 LogRecord lr = new LogRecord(Level.FINE,

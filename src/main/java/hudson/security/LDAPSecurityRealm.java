@@ -667,6 +667,25 @@ public class LDAPSecurityRealm extends AbstractPasswordBasedSecurityRealm {
             return null;
         }
     }
+    
+    @CheckForNull @Restricted(NoExternalUse.class)
+    public static LDAPConfiguration getConfigurationForUser(String username) {
+    	final SecurityRealm securityRealm = Jenkins.getActiveInstance().getSecurityRealm();
+        if (securityRealm instanceof LDAPSecurityRealm) {
+        	LDAPSecurityRealm realm = (LDAPSecurityRealm) securityRealm;
+            if (username != null) {
+            	LdapUserDetails d = (LdapUserDetails)realm.getSecurityComponents().userDetails2.loadUserByUsername(fixUsername(username));
+                return (realm.getConfigurationFor(((DelegatedLdapUserDetails) d).getConfigurationId()));
+            } else if (realm.hasConfiguration() && realm.configurations.size() == 1) {
+                return realm.configurations.get(0);
+            } else {
+            	return null;
+            }
+        } else {
+        	return null;
+        }
+    }
+
 
     @Restricted(NoExternalUse.class)
     public boolean hasMultiConfiguration() {
@@ -741,7 +760,7 @@ public class LDAPSecurityRealm extends AbstractPasswordBasedSecurityRealm {
             for (LDAPConfiguration conf : configurations) {
                 LDAPConfiguration.ApplicationContext appContext = conf.createApplicationContext(this);
                 manager.addDelegate(appContext.authenticationManager, conf.getId(), appContext.ldapUserSearch);
-                details.addDelegate(new LDAPUserDetailsService(appContext.ldapUserSearch, appContext.ldapAuthoritiesPopulator, conf.getGroupMembershipStrategy(), conf.getId()));
+                details.addDelegate(new LDAPUserDetailsService(appContext.ldapUserSearch, appContext.ldapAuthoritiesPopulator, conf.getGroupMembershipStrategy(), conf.getId(), conf));
             }
             return new SecurityComponents(manager, details);
     }
@@ -948,7 +967,7 @@ public class LDAPSecurityRealm extends AbstractPasswordBasedSecurityRealm {
         }
 
         static String extractGroupName(LdapName name, Attributes attributes) throws NamingException {
-            final String CN = "cn";
+            final String CN = "displayName";
             boolean isCN = false;
             String groupName = String.valueOf(name.getRdn(name.size() - 1).getValue());
             Attribute cnAttribute = attributes.get(CN);
@@ -1248,6 +1267,7 @@ public class LDAPSecurityRealm extends AbstractPasswordBasedSecurityRealm {
         public final LdapAuthoritiesPopulator authoritiesPopulator;
         public final LDAPGroupMembershipStrategy groupMembershipStrategy;
         public final String configurationId;
+        public final LDAPConfiguration ldapConfiguration;
         /**
          * {@link BasicAttributes} in LDAP tend to be bulky (about 20K at size), so interning them
          * to keep the size under control. When a programmatic client is not smart enough to
@@ -1255,11 +1275,12 @@ public class LDAPSecurityRealm extends AbstractPasswordBasedSecurityRealm {
          */
         private final LRUMap attributesCache = new LRUMap(32);
 
-        LDAPUserDetailsService(LdapUserSearch ldapSearch, LdapAuthoritiesPopulator authoritiesPopulator, LDAPGroupMembershipStrategy groupMembershipStrategy, String configurationId) {
+        LDAPUserDetailsService(LdapUserSearch ldapSearch, LdapAuthoritiesPopulator authoritiesPopulator, LDAPGroupMembershipStrategy groupMembershipStrategy, String configurationId, LDAPConfiguration conf) {
             this.ldapSearch = ldapSearch;
             this.authoritiesPopulator = authoritiesPopulator;
             this.groupMembershipStrategy = groupMembershipStrategy;
             this.configurationId = configurationId;
+            this.ldapConfiguration = conf;
         }
 
         @Override
@@ -1300,11 +1321,11 @@ public class LDAPSecurityRealm extends AbstractPasswordBasedSecurityRealm {
                         } else {
                             v = vv;
                         }
-                    }
+                    }  
 
                     Collection<? extends GrantedAuthority> extraAuthorities = groupMembershipStrategy == null
                             ? authoritiesPopulator.getGrantedAuthorities(ldapUser, username)
-                            : groupMembershipStrategy.getGrantedAuthorities(ldapUser, username);
+                            : groupMembershipStrategy.getGrantedAuthorities(ldapUser, username, ldapConfiguration);
                     for (GrantedAuthority extraAuthority : extraAuthorities) {
                         if (FORCE_GROUPNAME_LOWERCASE) {
                             user.addAuthority(new SimpleGrantedAuthority(extraAuthority.getAuthority().toLowerCase()));
@@ -1372,8 +1393,9 @@ public class LDAPSecurityRealm extends AbstractPasswordBasedSecurityRealm {
         public Collection<? extends GrantedAuthority> getGrantedAuthorities(DirContextOperations userData, String username) {
             if (strategy.getAuthoritiesPopulator() != populator) {
                 strategy.setAuthoritiesPopulator(populator);
-            }
-            return strategy.getGrantedAuthorities(userData, username);
+            } 
+            LDAPConfiguration conf = getConfigurationForUser(username);
+            return strategy.getGrantedAuthorities(userData, username, conf);
         }
 
     }

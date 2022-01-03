@@ -67,7 +67,7 @@ public abstract class LDAPGroupMembershipStrategy extends AbstractDescribableImp
      * @param userData as in 
      * @return the {@link GrantedAuthority}s that the specified user belongs to.
      */
-    public abstract Collection<? extends GrantedAuthority> getGrantedAuthorities(DirContextOperations userData, String username);
+    public abstract Collection<? extends GrantedAuthority> getGrantedAuthorities(DirContextOperations userData, String username, LDAPConfiguration conf);
 
     /**
      * Returns a {@link Set} of all members in the specified group.

@@ -76,7 +76,7 @@ public class FromGroupSearchLDAPGroupMembershipStrategy extends LDAPGroupMembers
     }
 
     @Override
-    public Collection<? extends GrantedAuthority> getGrantedAuthorities(DirContextOperations userData, String username) {
+    public Collection<? extends GrantedAuthority> getGrantedAuthorities(DirContextOperations userData, String username, LDAPConfiguration conf) {
         return getAuthoritiesPopulator().getGrantedAuthorities(userData, username);
     }
 
